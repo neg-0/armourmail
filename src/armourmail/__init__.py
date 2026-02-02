@@ -21,7 +21,7 @@ Example usage:
     )
 """
 
-from armourmail.detector import (
+from .detector import (
     PromptInjectionDetector,
     RiskLevel,
     ScanResult,
