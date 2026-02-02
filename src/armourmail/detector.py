@@ -96,6 +96,8 @@ DIRECT_INJECTION_PATTERNS = [
     (r"(?i)forget\s+(?:all\s+)?(?:previous|prior|your|earlier)\s+(?:instructions?|prompts?|rules?|training|context)", "forget_instructions"),
     (r"(?i)disregard\s+(?:all\s+)?(?:previous|prior|your|earlier|the)\s+(?:instructions?|prompts?|rules?|guidelines?)", "disregard_instructions"),
     (r"(?i)override\s+(?:all\s+)?(?:previous|prior|your|safety|security)\s+(?:instructions?|prompts?|rules?|settings?)", "override_instructions"),
+    (r"(?i)ignore\s+(?:all\s+)?(?:safety|security)\s+(?:rules?|protocols?|guidelines?|restrictions?)", "ignore_safety"),
+    (r"(?i)bypass\s+(?:all\s+)?(?:safety|security|content)\s+(?:filters?|rules?|restrictions?)", "bypass_safety"),
     
     # New instruction injection
     (r"(?i)(?:new|updated|revised|real)\s+(?:instructions?|prompts?|rules?|guidelines?)(?:\s*:|\s+are)", "new_instructions"),
@@ -375,8 +377,9 @@ class PromptInjectionDetector:
             comments = HTML_COMMENT_PATTERN.findall(html_content)
             for comment in comments:
                 # Check if comment contains suspicious content
+                comment_text = comment.replace("<!--", "").replace("-->", "")
                 for pattern, name, weight in self.all_patterns:
-                    if pattern.search(comment):
+                    if pattern.search(comment_text):
                         hidden_text_found = True
                         detected_patterns.append(f"hidden_comment_{name}")
                         details["hidden_text"].append({
@@ -385,6 +388,7 @@ class PromptInjectionDetector:
                             "snippet": comment[:100],
                         })
                         risk_score += weight + 10  # Extra weight for hidden
+                        break  # One match per comment is enough
         
         # Scan for injection patterns
         for pattern, name, weight in self.all_patterns:
