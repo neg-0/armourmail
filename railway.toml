@@ -3,5 +3,7 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
+# Railway executes startCommand without a shell, so $PORT won't expand unless we wrap it.
+startCommand = "sh -c 'uvicorn src.armourmail.api:app --host 0.0.0.0 --port ${PORT:-8000}'"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
