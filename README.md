@@ -38,6 +38,13 @@ Once running, visit:
 
 ## API Endpoints
 
+### SendGrid Inbound Parse
+
+ArmourMail can ingest emails via SendGrid Inbound Parse:
+- `POST /webhook/ingest`
+
+Setup guide: `docs/sendgrid-inbound-parse.md`
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check |
