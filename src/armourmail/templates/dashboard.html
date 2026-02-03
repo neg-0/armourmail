@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ArmourMail Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🛡️ ArmourMail</h1>
+      <p class="subtitle">Email Security for AI Agents</p>
+    </header>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="total-emails">-</div>
+        <div class="stat-label">Total Emails</div>
+      </div>
+      <div class="stat-card safe">
+        <div class="stat-value" id="safe-emails">-</div>
+        <div class="stat-label">Safe</div>
+      </div>
+      <div class="stat-card suspicious">
+        <div class="stat-value" id="suspicious-emails">-</div>
+        <div class="stat-label">Suspicious</div>
+      </div>
+      <div class="stat-card quarantined">
+        <div class="stat-value" id="quarantined-emails">-</div>
+        <div class="stat-label">Quarantined</div>
+      </div>
+    </div>
+
+    <section class="email-list">
+      <h2>Recent Emails</h2>
+      <div class="filters">
+        <select id="status-filter">
+          <option value="">All Statuses</option>
+          <option value="safe">Safe</option>
+          <option value="suspicious">Suspicious</option>
+          <option value="quarantined">Quarantined</option>
+        </select>
+        <button id="refresh-btn">Refresh</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>From</th>
+            <th>Subject</th>
+            <th>Threat Level</th>
+            <th>Received</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="email-tbody">
+          <tr><td colspan="6" class="loading">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="email-detail" id="email-detail" style="display:none;">
+      <h2>Email Details</h2>
+      <div id="detail-content"></div>
+      <button id="close-detail">Close</button>
+    </section>
+  </div>
+
+  <script>
+    const API_BASE = '';
+
+    async function fetchStats() {
+      try {
+        const resp = await fetch(`${API_BASE}/emails?page_size=1000`);
+        const data = await resp.json();
+        const emails = data.items || [];
+        
+        const total = emails.length;
+        const safe = emails.filter(e => e.status === 'safe').length;
+        const suspicious = emails.filter(e => e.status === 'suspicious').length;
+        const quarantined = emails.filter(e => e.status === 'quarantined').length;
+
+        document.getElementById('total-emails').textContent = total;
+        document.getElementById('safe-emails').textContent = safe;
+        document.getElementById('suspicious-emails').textContent = suspicious;
+        document.getElementById('quarantined-emails').textContent = quarantined;
+      } catch (err) {
+        console.error('Failed to fetch stats:', err);
+      }
+    }
+
+    async function fetchEmails(status = '') {
+      const tbody = document.getElementById('email-tbody');
+      tbody.innerHTML = '<tr><td colspan="6" class="loading">Loading...</td></tr>';
+
+      try {
+        let url = `${API_BASE}/emails?page_size=50`;
+        if (status) url += `&status=${status}`;
+        
+        const resp = await fetch(url);
+        const data = await resp.json();
+        const emails = data.items || [];
+
+        if (emails.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" class="empty">No emails found</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = emails.map(email => `
+          <tr class="email-row ${email.status}">
+            <td><span class="status-badge ${email.status}">${email.status}</span></td>
+            <td>${escapeHtml(email.sender)}</td>
+            <td>${escapeHtml(email.subject || '(no subject)')}</td>
+            <td><span class="threat-badge ${email.threat_level || 'none'}">${email.threat_level || 'N/A'}</span></td>
+            <td>${new Date(email.received_at).toLocaleString()}</td>
+            <td>
+              <button onclick="viewEmail('${email.id}')">View</button>
+            </td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        console.error('Failed to fetch emails:', err);
+        tbody.innerHTML = '<tr><td colspan="6" class="error">Failed to load emails</td></tr>';
+      }
+    }
+
+    async function viewEmail(id) {
+      try {
+        const resp = await fetch(`${API_BASE}/emails/${id}`);
+        const email = await resp.json();
+
+        const detail = document.getElementById('email-detail');
+        const content = document.getElementById('detail-content');
+
+        content.innerHTML = `
+          <div class="detail-grid">
+            <div class="detail-row"><strong>ID:</strong> ${email.id}</div>
+            <div class="detail-row"><strong>From:</strong> ${escapeHtml(email.sender)}</div>
+            <div class="detail-row"><strong>To:</strong> ${escapeHtml(email.recipient)}</div>
+            <div class="detail-row"><strong>Subject:</strong> ${escapeHtml(email.subject || '(none)')}</div>
+            <div class="detail-row"><strong>Status:</strong> <span class="status-badge ${email.status}">${email.status}</span></div>
+            <div class="detail-row"><strong>Received:</strong> ${new Date(email.received_at).toLocaleString()}</div>
+            ${email.scan_result ? `
+              <div class="detail-row"><strong>Threat Level:</strong> <span class="threat-badge ${email.scan_result.threat_level}">${email.scan_result.threat_level}</span></div>
+              <div class="detail-row"><strong>Flags:</strong> ${email.scan_result.flags?.join(', ') || 'None'}</div>
+              <div class="detail-row"><strong>Score:</strong> ${email.scan_result.score ?? 'N/A'}</div>
+            ` : ''}
+            <div class="detail-row full-width">
+              <strong>Body (Plain):</strong>
+              <pre>${escapeHtml(email.body_plain || '(empty)')}</pre>
+            </div>
+          </div>
+          ${email.status === 'quarantined' ? `
+            <div class="actions">
+              <button onclick="releaseEmail('${email.id}')">Release to Inbox</button>
+              <button onclick="deleteEmail('${email.id}')" class="danger">Delete Permanently</button>
+            </div>
+          ` : ''}
+        `;
+
+        detail.style.display = 'block';
+      } catch (err) {
+        console.error('Failed to load email:', err);
+        alert('Failed to load email details');
+      }
+    }
+
+    async function releaseEmail(id) {
+      if (!confirm('Release this email from quarantine?')) return;
+      try {
+        await fetch(`${API_BASE}/emails/${id}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'release' })
+        });
+        fetchEmails(document.getElementById('status-filter').value);
+        fetchStats();
+        document.getElementById('email-detail').style.display = 'none';
+      } catch (err) {
+        alert('Failed to release email');
+      }
+    }
+
+    async function deleteEmail(id) {
+      if (!confirm('Permanently delete this email?')) return;
+      try {
+        await fetch(`${API_BASE}/emails/${id}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete' })
+        });
+        fetchEmails(document.getElementById('status-filter').value);
+        fetchStats();
+        document.getElementById('email-detail').style.display = 'none';
+      } catch (err) {
+        alert('Failed to delete email');
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text || '';
+      return div.innerHTML;
+    }
+
+    // Event listeners
+    document.getElementById('status-filter').addEventListener('change', (e) => {
+      fetchEmails(e.target.value);
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click', () => {
+      fetchEmails(document.getElementById('status-filter').value);
+      fetchStats();
+    });
+
+    document.getElementById('close-detail').addEventListener('click', () => {
+      document.getElementById('email-detail').style.display = 'none';
+    });
+
+    // Initial load
+    fetchStats();
+    fetchEmails();
+  </script>
+</body>
+</html>

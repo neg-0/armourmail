@@ -3,12 +3,14 @@
 import logging
 from datetime import datetime
 from math import ceil
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .models import (
     Email,
@@ -34,6 +36,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("armourmail")
 
+# Paths
+BASE_DIR = Path(__file__).parent
+TEMPLATES_DIR = BASE_DIR / "templates"
+STATIC_DIR = BASE_DIR / "static"
+
 # Initialize FastAPI app
 app = FastAPI(
     title="ArmourMail API",
@@ -42,6 +49,10 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Mount static files
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # CORS middleware
 app.add_middleware(
@@ -88,6 +99,18 @@ async def health_check():
     Returns the service status, version, and current timestamp.
     """
     return HealthResponse()
+
+
+# Dashboard endpoint
+@app.get("/", response_class=HTMLResponse, tags=["Dashboard"])
+async def dashboard():
+    """
+    Serve the ArmourMail dashboard.
+    """
+    dashboard_path = TEMPLATES_DIR / "dashboard.html"
+    if dashboard_path.exists():
+        return HTMLResponse(content=dashboard_path.read_text())
+    return HTMLResponse(content="<h1>ArmourMail</h1><p>Dashboard not found. Visit <a href='/docs'>/docs</a> for API.</p>")
 
 
 # Webhook endpoint for SendGrid Inbound Parse
