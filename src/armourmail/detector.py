@@ -556,17 +556,60 @@ def scan_email(
     body_html: Optional[str] = None,
     sender: Optional[str] = None,
 ) -> ScanResult:
-    """
-    Convenience function to scan an email with default settings.
-    
-    Args:
-        subject: Email subject
-        body_plain: Plain text body
-        body_html: Optional HTML body
-        sender: Optional sender address
-        
-    Returns:
-        ScanResult with findings
-    """
+    """Convenience function to scan an email with default settings."""
     detector = PromptInjectionDetector()
     return detector.scan_email(subject, body_plain, body_html, sender)
+
+
+# =============================================================================
+# API INTEGRATION (FastAPI app)
+# =============================================================================
+
+async def scan_email_api(email: "object"):
+    """Scan an API Email model and return the API ScanResult model.
+
+    The FastAPI app (src/armourmail/api.py) expects an async scanner returning
+    `armourmail.models.ScanResult` with:
+      - threat_level (none/low/medium/high/critical)
+      - score (0-100)
+      - flags (pattern names)
+
+    The core detector is synchronous and returns a different ScanResult shape.
+    This adapter bridges the two.
+    """
+
+    # Local import to avoid a hard dependency when using ArmourMail as a library.
+    from .models import ScanResult as ApiScanResult, ThreatLevel
+
+    detector = PromptInjectionDetector()
+
+    subject = getattr(email, "subject", "") or ""
+    body_plain = getattr(email, "body_plain", "") or ""
+    body_html = getattr(email, "body_html", None)
+    sender = getattr(email, "sender", None)
+
+    result = detector.scan_email(
+        subject=subject,
+        body_plain=body_plain,
+        body_html=body_html,
+        sender=sender,
+    )
+
+    score = int(result.risk_score)
+
+    if score >= 85:
+        threat_level = ThreatLevel.CRITICAL
+    elif score >= 65:
+        threat_level = ThreatLevel.HIGH
+    elif score >= 40:
+        threat_level = ThreatLevel.MEDIUM
+    elif score >= 15:
+        threat_level = ThreatLevel.LOW
+    else:
+        threat_level = ThreatLevel.NONE
+
+    return ApiScanResult(
+        threat_level=threat_level,
+        score=score,
+        flags=sorted(set(result.detected_patterns or [])),
+    )

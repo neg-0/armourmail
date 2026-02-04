@@ -1,6 +1,7 @@
 """ArmourMail API - Email security service for AI agents."""
 
 import logging
+import re
 from datetime import datetime
 from math import ceil
 from pathlib import Path
@@ -26,8 +27,8 @@ from .models import (
     WebhookResponse,
 )
 
-# Assume detector module exists
-from .detector import scan_email
+# Detector
+from .detector import scan_email_api
 
 # Configure logging
 logging.basicConfig(
@@ -123,6 +124,7 @@ async def ingest_email(
     text: str = Form(None),
     html: str = Form(None),
     headers: str = Form(None),
+    raw_email: str = Form(None, alias="email"),
     attachments: Optional[list[UploadFile]] = File(None),
 ):
     """
@@ -154,22 +156,71 @@ async def ingest_email(
         if attachments:
             attachment_names = [a.filename for a in attachments if a.filename]
         
+        # Best-effort body extraction (SendGrid Inbound Parse can send `text`, `html`, and/or raw `email`)
+        body_plain = text
+        body_html = html
+
+        if (not body_plain) and body_html:
+            # Fallback: derive a plain-text body from HTML
+            body_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body_html)).strip()
+
+        if (not body_plain) and raw_email:
+            # Fallback: parse the raw RFC822 email
+            try:
+                from email import policy
+                from email.parser import BytesParser
+
+                msg = BytesParser(policy=policy.default).parsebytes(raw_email.encode("utf-8", errors="ignore"))
+
+                if msg.is_multipart():
+                    # Prefer text/plain
+                    for part in msg.walk():
+                        ctype = part.get_content_type()
+                        if ctype == "text/plain":
+                            body_plain = part.get_content()
+                            break
+                    # Then text/html
+                    if (not body_plain):
+                        for part in msg.walk():
+                            if part.get_content_type() == "text/html":
+                                body_html = body_html or part.get_content()
+                                body_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body_html)).strip()
+                                break
+                else:
+                    ctype = msg.get_content_type()
+                    if ctype == "text/plain":
+                        body_plain = msg.get_content()
+                    elif ctype == "text/html":
+                        body_html = body_html or msg.get_content()
+                        body_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body_html)).strip()
+            except Exception:
+                # If parsing fails, keep whatever we have
+                pass
+
         # Create email record
         email_data = EmailCreate(
             sender=sender,
             recipient=recipient,
             subject=subject,
-            body_plain=text,
-            body_html=html,
+            body_plain=body_plain,
+            body_html=body_html,
             headers=parsed_headers,
             attachments=attachment_names,
+            raw_payload={
+                "from": from_,
+                "to": to,
+                "subject": subject,
+                "has_text": bool(text),
+                "has_html": bool(html),
+                "has_raw_email": bool(raw_email),
+            },
         )
         
         email = Email(**email_data.model_dump())
         
         # Scan email for threats
         try:
-            scan_result = await scan_email(email)
+            scan_result = await scan_email_api(email)
             email.scan_result = scan_result
             email.processed_at = datetime.utcnow()
             

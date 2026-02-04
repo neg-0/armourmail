@@ -28,14 +28,25 @@ class ThreatLevel(str, Enum):
 
 
 class ScanResult(BaseModel):
-    """Results from email security scan."""
+    """Results from email security scan.
+
+    Note: the dashboard expects a top-level `score` field (0-100).
+    """
+
+    # Primary summary fields
     threat_level: ThreatLevel = ThreatLevel.NONE
+    score: Optional[int] = Field(default=None, ge=0, le=100)
+
+    # (Future) traditional email security signals
     phishing_score: float = Field(ge=0.0, le=1.0, default=0.0)
     spam_score: float = Field(ge=0.0, le=1.0, default=0.0)
     malware_detected: bool = False
     suspicious_links: list[str] = Field(default_factory=list)
     suspicious_attachments: list[str] = Field(default_factory=list)
+
+    # Generic flags/pattern names
     flags: list[str] = Field(default_factory=list)
+
     scanned_at: datetime = Field(default_factory=datetime.utcnow)
 
 
