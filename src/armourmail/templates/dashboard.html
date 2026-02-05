@@ -69,6 +69,16 @@
 
   <script>
     const API_BASE = '';
+    const API_KEY = 'changeme';
+
+    function apiFetch(url, options = {}) {
+      const headers = {
+        'X-API-Key': API_KEY,
+        ...(options.headers || {})
+      };
+
+      return fetch(url, { ...options, headers });
+    }
 
     async function fetchAllEmails() {
       const pageSize = 100;
@@ -76,7 +86,7 @@
       let all = [];
 
       while (true) {
-        const resp = await fetch(`${API_BASE}/emails?page_size=${pageSize}&page=${page}`);
+        const resp = await apiFetch(`${API_BASE}/emails?page_size=${pageSize}&page=${page}`);
         const data = await resp.json();
         const items = data.items || [];
         all = all.concat(items);
@@ -114,7 +124,7 @@
         let url = `${API_BASE}/emails?page_size=50`;
         if (status) url += `&status=${status}`;
         
-        const resp = await fetch(url);
+        const resp = await apiFetch(url);
         const data = await resp.json();
         const emails = data.items || [];
 
@@ -143,7 +153,7 @@
 
     async function viewEmail(id) {
       try {
-        const resp = await fetch(`${API_BASE}/emails/${id}`);
+        const resp = await apiFetch(`${API_BASE}/emails/${id}`);
         const email = await resp.json();
 
         const detail = document.getElementById('email-detail');
@@ -185,7 +195,7 @@
     async function releaseEmail(id) {
       if (!confirm('Release this email from quarantine?')) return;
       try {
-        await fetch(`${API_BASE}/quarantine/${id}/approve`, { method: 'POST' });
+        await apiFetch(`${API_BASE}/quarantine/${id}/approve`, { method: 'POST' });
         fetchEmails(document.getElementById('status-filter').value);
         fetchStats();
         document.getElementById('email-detail').style.display = 'none';
@@ -197,7 +207,7 @@
     async function deleteEmail(id) {
       if (!confirm('Permanently delete this email?')) return;
       try {
-        await fetch(`${API_BASE}/quarantine/${id}/reject`, {
+        await apiFetch(`${API_BASE}/quarantine/${id}/reject`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ reason: 'Rejected from dashboard' })

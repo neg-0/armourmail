@@ -1,6 +1,7 @@
 """ArmourMail API - Email security service for AI agents."""
 
 import logging
+import os
 import re
 from datetime import datetime
 from math import ceil
@@ -63,6 +64,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+API_KEY = os.getenv("API_KEY")
+SENDGRID_WEBHOOK_SECRET = os.getenv("SENDGRID_WEBHOOK_SECRET")
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """Require X-API-Key header for all endpoints except webhook ingest."""
+    if request.url.path == "/webhook/ingest":
+        return await call_next(request)
+
+    api_key = request.headers.get("X-API-Key")
+    if not API_KEY or api_key != API_KEY:
+        return JSONResponse(
+            status_code=401,
+            content=ErrorResponse(error="Unauthorized").model_dump(),
+        )
+
+    return await call_next(request)
+
 
 # In-memory storage (replace with database in production)
 email_store: dict[UUID, Email] = {}
@@ -134,6 +155,16 @@ async def ingest_email(
     automatically quarantined.
     """
     try:
+        # Validate webhook secret if configured
+        if SENDGRID_WEBHOOK_SECRET:
+            provided_secret = (
+                request.headers.get("X-SendGrid-Webhook-Secret")
+                or request.headers.get("X-Sendgrid-Webhook-Secret")
+            )
+            if provided_secret != SENDGRID_WEBHOOK_SECRET:
+                raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
+        # Parse form data and collect attachments
         form = await request.form()
         attachments: list[UploadFile] = []
         attachment_metadata: list[dict] = []
