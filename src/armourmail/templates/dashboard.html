@@ -70,12 +70,28 @@
   <script>
     const API_BASE = '';
 
+    async function fetchAllEmails() {
+      const pageSize = 100;
+      let page = 1;
+      let all = [];
+
+      while (true) {
+        const resp = await fetch(`${API_BASE}/emails?page_size=${pageSize}&page=${page}`);
+        const data = await resp.json();
+        const items = data.items || [];
+        all = all.concat(items);
+
+        if (!data.total_pages || page >= data.total_pages) break;
+        page += 1;
+      }
+
+      return all;
+    }
+
     async function fetchStats() {
       try {
-        const resp = await fetch(`${API_BASE}/emails?page_size=1000`);
-        const data = await resp.json();
-        const emails = data.items || [];
-        
+        const emails = await fetchAllEmails();
+
         const total = emails.length;
         const safe = emails.filter(e => e.status === 'safe').length;
         const suspicious = emails.filter(e => e.status === 'suspicious').length;
@@ -169,11 +185,7 @@
     async function releaseEmail(id) {
       if (!confirm('Release this email from quarantine?')) return;
       try {
-        await fetch(`${API_BASE}/emails/${id}/action`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'release' })
-        });
+        await fetch(`${API_BASE}/quarantine/${id}/approve`, { method: 'POST' });
         fetchEmails(document.getElementById('status-filter').value);
         fetchStats();
         document.getElementById('email-detail').style.display = 'none';
@@ -185,10 +197,10 @@
     async function deleteEmail(id) {
       if (!confirm('Permanently delete this email?')) return;
       try {
-        await fetch(`${API_BASE}/emails/${id}/action`, {
+        await fetch(`${API_BASE}/quarantine/${id}/reject`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'delete' })
+          body: JSON.stringify({ reason: 'Rejected from dashboard' })
         });
         fetchEmails(document.getElementById('status-filter').value);
         fetchStats();
