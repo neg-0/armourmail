@@ -11,8 +11,10 @@ from uuid import UUID
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 
 from .models import (
     Email,
@@ -26,6 +28,14 @@ from .models import (
     ScanResult,
     ThreatLevel,
     WebhookResponse,
+)
+from .db import (
+    AsyncSessionLocal,
+    Base,
+    EmailRecord,
+    ScanResultRecord,
+    engine,
+    is_database_configured,
 )
 
 # Detector
@@ -85,8 +95,34 @@ async def api_key_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# In-memory storage (replace with database in production)
+# In-memory storage (fallback when DATABASE_URL not set)
 email_store: dict[UUID, Email] = {}
+
+
+def email_record_to_model(record: EmailRecord) -> Email:
+    scan_result = None
+    if record.scan_result:
+        scan_result = ScanResult(
+            threat_level=record.scan_result.threat_level,
+            score=record.scan_result.score,
+            flags=record.scan_result.flags or [],
+            scanned_at=record.scan_result.scanned_at,
+        )
+
+    return Email(
+        id=record.id,
+        sender=record.sender,
+        recipient=record.recipient,
+        subject=record.subject,
+        body_plain=record.body_plain,
+        body_html=record.body_html,
+        status=record.status,
+        scan_result=scan_result,
+        received_at=record.received_at,
+        processed_at=record.processed_at,
+        headers=record.headers or {},
+        attachments=record.attachments or [],
+    )
 
 
 # Exception handlers
@@ -301,7 +337,35 @@ async def ingest_email(
             )
         
         # Store email
-        email_store[email.id] = email
+        if is_database_configured() and AsyncSessionLocal:
+            async with AsyncSessionLocal() as session:
+                email_record = EmailRecord(
+                    id=email.id,
+                    sender=email.sender,
+                    recipient=email.recipient,
+                    subject=email.subject,
+                    body_plain=email.body_plain,
+                    body_html=email.body_html,
+                    status=email.status,
+                    received_at=email.received_at,
+                    processed_at=email.processed_at,
+                    headers=email.headers,
+                    attachments=email.attachments,
+                    raw_payload=email_data.raw_payload,
+                    threat_score=email.scan_result.score if email.scan_result else None,
+                )
+                if email.scan_result:
+                    email_record.scan_result = ScanResultRecord(
+                        threat_level=email.scan_result.threat_level,
+                        score=email.scan_result.score,
+                        flags=email.scan_result.flags,
+                        scanned_at=email.scan_result.scanned_at,
+                    )
+
+                session.add(email_record)
+                await session.commit()
+        else:
+            email_store[email.id] = email
         
         logger.info(f"Email {email.id} processed with status: {email.status}")
         
@@ -329,25 +393,75 @@ async def list_emails(
     
     Supports filtering by status and sender email address.
     """
-    # Filter emails
+    if is_database_configured() and AsyncSessionLocal:
+        async with AsyncSessionLocal() as session:
+            filters = []
+            if status:
+                filters.append(EmailRecord.status == status)
+            if sender:
+                filters.append(EmailRecord.sender.ilike(f"%{sender}%"))
+
+            total = await session.scalar(
+                select(func.count()).select_from(EmailRecord).where(*filters)
+            )
+            total = total or 0
+            total_pages = ceil(total / page_size) if total > 0 else 1
+            start = (page - 1) * page_size
+
+            stmt = (
+                select(EmailRecord)
+                .options(selectinload(EmailRecord.scan_result))
+                .where(*filters)
+                .order_by(EmailRecord.received_at.desc())
+                .offset(start)
+                .limit(page_size)
+            )
+            records = (await session.scalars(stmt)).all()
+
+            summaries = [
+                EmailSummary(
+                    id=record.id,
+                    sender=record.sender,
+                    recipient=record.recipient,
+                    subject=record.subject,
+                    status=record.status,
+                    threat_level=(
+                        record.scan_result.threat_level
+                        if record.scan_result
+                        else None
+                    ),
+                    received_at=record.received_at,
+                )
+                for record in records
+            ]
+
+            return EmailListResponse(
+                items=summaries,
+                total=total,
+                page=page,
+                page_size=page_size,
+                total_pages=total_pages,
+            )
+
+    # Fallback: in-memory store
     emails = list(email_store.values())
-    
+
     if status:
         emails = [e for e in emails if e.status == status]
-    
+
     if sender:
         emails = [e for e in emails if sender.lower() in e.sender.lower()]
-    
+
     # Sort by received date (newest first)
     emails.sort(key=lambda e: e.received_at, reverse=True)
-    
+
     # Paginate
     total = len(emails)
     total_pages = ceil(total / page_size) if total > 0 else 1
     start = (page - 1) * page_size
     end = start + page_size
     page_emails = emails[start:end]
-    
+
     # Convert to summaries
     summaries = [
         EmailSummary(
@@ -361,7 +475,7 @@ async def list_emails(
         )
         for e in page_emails
     ]
-    
+
     return EmailListResponse(
         items=summaries,
         total=total,
@@ -377,6 +491,18 @@ async def get_email(email_id: UUID):
     """
     Get a single email by ID with full details and scan results.
     """
+    if is_database_configured() and AsyncSessionLocal:
+        async with AsyncSessionLocal() as session:
+            stmt = (
+                select(EmailRecord)
+                .options(selectinload(EmailRecord.scan_result))
+                .where(EmailRecord.id == email_id)
+            )
+            record = (await session.scalars(stmt)).first()
+            if not record:
+                raise HTTPException(status_code=404, detail="Email not found")
+            return email_record_to_model(record)
+
     email = email_store.get(email_id)
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
@@ -394,19 +520,65 @@ async def list_quarantined(
     
     Returns emails with status QUARANTINED that need approval or rejection.
     """
-    # Get only quarantined emails
+    if is_database_configured() and AsyncSessionLocal:
+        async with AsyncSessionLocal() as session:
+            filters = [EmailRecord.status == EmailStatus.QUARANTINED]
+
+            total = await session.scalar(
+                select(func.count()).select_from(EmailRecord).where(*filters)
+            )
+            total = total or 0
+            total_pages = ceil(total / page_size) if total > 0 else 1
+            start = (page - 1) * page_size
+
+            stmt = (
+                select(EmailRecord)
+                .options(selectinload(EmailRecord.scan_result))
+                .where(*filters)
+                .order_by(EmailRecord.received_at.asc())
+                .offset(start)
+                .limit(page_size)
+            )
+            records = (await session.scalars(stmt)).all()
+
+            summaries = [
+                EmailSummary(
+                    id=record.id,
+                    sender=record.sender,
+                    recipient=record.recipient,
+                    subject=record.subject,
+                    status=record.status,
+                    threat_level=(
+                        record.scan_result.threat_level
+                        if record.scan_result
+                        else None
+                    ),
+                    received_at=record.received_at,
+                )
+                for record in records
+            ]
+
+            return EmailListResponse(
+                items=summaries,
+                total=total,
+                page=page,
+                page_size=page_size,
+                total_pages=total_pages,
+            )
+
+    # Fallback: in-memory store
     quarantined = [e for e in email_store.values() if e.status == EmailStatus.QUARANTINED]
-    
+
     # Sort by received date (oldest first - FIFO for review)
     quarantined.sort(key=lambda e: e.received_at)
-    
+
     # Paginate
     total = len(quarantined)
     total_pages = ceil(total / page_size) if total > 0 else 1
     start = (page - 1) * page_size
     end = start + page_size
     page_emails = quarantined[start:end]
-    
+
     # Convert to summaries
     summaries = [
         EmailSummary(
@@ -420,7 +592,7 @@ async def list_quarantined(
         )
         for e in page_emails
     ]
-    
+
     return EmailListResponse(
         items=summaries,
         total=total,
@@ -438,25 +610,56 @@ async def approve_email(email_id: UUID, action: QuarantineAction = None):
     
     The email will be marked as APPROVED and can be delivered to the recipient.
     """
+    if is_database_configured() and AsyncSessionLocal:
+        async with AsyncSessionLocal() as session:
+            stmt = (
+                select(EmailRecord)
+                .options(selectinload(EmailRecord.scan_result))
+                .where(EmailRecord.id == email_id)
+            )
+            record = (await session.scalars(stmt)).first()
+            if not record:
+                raise HTTPException(status_code=404, detail="Email not found")
+
+            if record.status != EmailStatus.QUARANTINED:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Email is not quarantined. "
+                        f"Current status: {record.status.value}"
+                    ),
+                )
+
+            record.status = EmailStatus.APPROVED
+            record.processed_at = datetime.utcnow()
+            await session.commit()
+
+            logger.info(f"Email {email_id} approved and released from quarantine")
+
+            if action and action.notify_sender:
+                logger.info(f"Notification requested for email {email_id}")
+
+            return email_record_to_model(record)
+
     email = email_store.get(email_id)
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
-    
+
     if email.status != EmailStatus.QUARANTINED:
         raise HTTPException(
             status_code=400,
             detail=f"Email is not quarantined. Current status: {email.status.value}"
         )
-    
+
     email.status = EmailStatus.APPROVED
     email.processed_at = datetime.utcnow()
-    
+
     logger.info(f"Email {email_id} approved and released from quarantine")
-    
+
     # TODO: Trigger delivery to recipient if notify_sender is True
     if action and action.notify_sender:
         logger.info(f"Notification requested for email {email_id}")
-    
+
     return email
 
 
@@ -468,22 +671,51 @@ async def reject_email(email_id: UUID, action: QuarantineAction = None):
     
     The email will be marked as REJECTED and will not be delivered.
     """
+    if is_database_configured() and AsyncSessionLocal:
+        async with AsyncSessionLocal() as session:
+            stmt = (
+                select(EmailRecord)
+                .options(selectinload(EmailRecord.scan_result))
+                .where(EmailRecord.id == email_id)
+            )
+            record = (await session.scalars(stmt)).first()
+            if not record:
+                raise HTTPException(status_code=404, detail="Email not found")
+
+            if record.status != EmailStatus.QUARANTINED:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Email is not quarantined. "
+                        f"Current status: {record.status.value}"
+                    ),
+                )
+
+            record.status = EmailStatus.REJECTED
+            record.processed_at = datetime.utcnow()
+            await session.commit()
+
+            reason = action.reason if action else "No reason provided"
+            logger.info(f"Email {email_id} rejected. Reason: {reason}")
+
+            return email_record_to_model(record)
+
     email = email_store.get(email_id)
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
-    
+
     if email.status != EmailStatus.QUARANTINED:
         raise HTTPException(
             status_code=400,
             detail=f"Email is not quarantined. Current status: {email.status.value}"
         )
-    
+
     email.status = EmailStatus.REJECTED
     email.processed_at = datetime.utcnow()
-    
+
     reason = action.reason if action else "No reason provided"
     logger.info(f"Email {email_id} rejected. Reason: {reason}")
-    
+
     return email
 
 
@@ -492,6 +724,9 @@ async def reject_email(email_id: UUID, action: QuarantineAction = None):
 async def startup_event():
     """Initialize resources on startup."""
     logger.info("ArmourMail API starting up...")
+    if is_database_configured() and engine:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
 
 @app.on_event("shutdown")
