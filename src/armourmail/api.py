@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
-from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile, File
+from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -125,7 +125,6 @@ async def ingest_email(
     html: str = Form(None),
     headers: str = Form(None),
     raw_email: str = Form(None, alias="email"),
-    attachments: Optional[list[UploadFile]] = File(None),
 ):
     """
     Receive emails from SendGrid Inbound Parse webhook.
@@ -135,6 +134,34 @@ async def ingest_email(
     automatically quarantined.
     """
     try:
+        form = await request.form()
+        attachments: list[UploadFile] = []
+        attachment_metadata: list[dict] = []
+
+        for key, value in form.multi_items():
+            if not key.startswith("attachment"):
+                continue
+            if not isinstance(value, UploadFile):
+                continue
+            attachments.append(value)
+
+            size = None
+            try:
+                value.file.seek(0, 2)
+                size = value.file.tell()
+                value.file.seek(0)
+            except Exception:
+                size = None
+
+            attachment_metadata.append(
+                {
+                    "field": key,
+                    "filename": value.filename,
+                    "content_type": value.content_type,
+                    "size": size,
+                }
+            )
+
         # Parse sender and recipient
         sender = from_ or "unknown@unknown.com"
         recipient = to or "unknown@unknown.com"
@@ -213,6 +240,7 @@ async def ingest_email(
                 "has_text": bool(text),
                 "has_html": bool(html),
                 "has_raw_email": bool(raw_email),
+                "attachments": attachment_metadata,
             },
         )
         
