@@ -1,0 +1,14 @@
+{
+  "agents": {
+    "captain@armourmail.io": {
+      "id": "captain",
+      "sessionKey": "agent:captain:main",
+      "description": "Captain (Product CEO of ShipLog)"
+    },
+    "warden@armourmail.io": {
+      "id": "warden",
+      "sessionKey": "agent:warden:main",
+      "description": "The Warden (ArmourMail CEO)"
+    }
+  }
+}
