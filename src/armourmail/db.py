@@ -82,13 +82,9 @@ class ScanResultRecord(Base):
 
 
 engine = (
-    create_async_engine(DATABASE_URL, echo=False, future=True)
-    if DATABASE_URL
-    else None
+    create_async_engine(DATABASE_URL, echo=False, future=True) if DATABASE_URL else None
 )
 
 AsyncSessionLocal: Optional[async_sessionmaker[AsyncSession]] = (
-    async_sessionmaker(engine, expire_on_commit=False)
-    if engine
-    else None
+    async_sessionmaker(engine, expire_on_commit=False) if engine else None
 )

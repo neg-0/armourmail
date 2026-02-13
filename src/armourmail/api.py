@@ -43,8 +43,7 @@ from .detector import scan_email_api
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("armourmail")
 
@@ -142,8 +141,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content=ErrorResponse(
-            error="Internal server error",
-            detail=str(exc) if app.debug else None
+            error="Internal server error", detail=str(exc) if app.debug else None
         ).model_dump(),
     )
 
@@ -153,7 +151,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 async def health_check():
     """
     Health check endpoint.
-    
+
     Returns the service status, version, and current timestamp.
     """
     return HealthResponse()
@@ -168,7 +166,9 @@ async def dashboard():
     dashboard_path = TEMPLATES_DIR / "dashboard.html"
     if dashboard_path.exists():
         return HTMLResponse(content=dashboard_path.read_text())
-    return HTMLResponse(content="<h1>ArmourMail</h1><p>Dashboard not found. Visit <a href='/docs'>/docs</a> for API.</p>")
+    return HTMLResponse(
+        content="<h1>ArmourMail</h1><p>Dashboard not found. Visit <a href='/docs'>/docs</a> for API.</p>"
+    )
 
 
 # Webhook endpoint for SendGrid Inbound Parse
@@ -185,7 +185,7 @@ async def ingest_email(
 ):
     """
     Receive emails from SendGrid Inbound Parse webhook.
-    
+
     This endpoint processes incoming emails, scans them for threats,
     and stores them in the system. Emails flagged as threats are
     automatically quarantined.
@@ -193,10 +193,9 @@ async def ingest_email(
     try:
         # Validate webhook secret if configured
         if SENDGRID_WEBHOOK_SECRET:
-            provided_secret = (
-                request.headers.get("X-SendGrid-Webhook-Secret")
-                or request.headers.get("X-Sendgrid-Webhook-Secret")
-            )
+            provided_secret = request.headers.get(
+                "X-SendGrid-Webhook-Secret"
+            ) or request.headers.get("X-Sendgrid-Webhook-Secret")
             if provided_secret != SENDGRID_WEBHOOK_SECRET:
                 raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
@@ -232,24 +231,25 @@ async def ingest_email(
         # Parse sender and recipient
         sender = from_ or "unknown@unknown.com"
         recipient = to or "unknown@unknown.com"
-        
+
         logger.info(f"Receiving email from {sender} to {recipient}: {subject}")
-        
+
         # Parse headers if provided
         parsed_headers = {}
         if headers:
             try:
                 import json
+
                 parsed_headers = json.loads(headers)
             except:
                 # Headers might be in different format
                 parsed_headers = {"raw": headers}
-        
+
         # Get attachment filenames
         attachment_names = []
         if attachments:
             attachment_names = [a.filename for a in attachments if a.filename]
-        
+
         # Best-effort body extraction (SendGrid Inbound Parse can send `text`, `html`, and/or raw `email`)
         body_plain = text
         body_html = html
@@ -264,7 +264,9 @@ async def ingest_email(
                 from email import policy
                 from email.parser import BytesParser
 
-                msg = BytesParser(policy=policy.default).parsebytes(raw_email.encode("utf-8", errors="ignore"))
+                msg = BytesParser(policy=policy.default).parsebytes(
+                    raw_email.encode("utf-8", errors="ignore")
+                )
 
                 if msg.is_multipart():
                     # Prefer text/plain
@@ -274,11 +276,13 @@ async def ingest_email(
                             body_plain = part.get_content()
                             break
                     # Then text/html
-                    if (not body_plain):
+                    if not body_plain:
                         for part in msg.walk():
                             if part.get_content_type() == "text/html":
                                 body_html = body_html or part.get_content()
-                                body_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body_html)).strip()
+                                body_plain = re.sub(
+                                    r"\s+", " ", re.sub(r"<[^>]+>", " ", body_html)
+                                ).strip()
                                 break
                 else:
                     ctype = msg.get_content_type()
@@ -286,7 +290,9 @@ async def ingest_email(
                         body_plain = msg.get_content()
                     elif ctype == "text/html":
                         body_html = body_html or msg.get_content()
-                        body_plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body_html)).strip()
+                        body_plain = re.sub(
+                            r"\s+", " ", re.sub(r"<[^>]+>", " ", body_html)
+                        ).strip()
             except Exception:
                 # If parsing fails, keep whatever we have
                 pass
@@ -310,32 +316,33 @@ async def ingest_email(
                 "attachments": attachment_metadata,
             },
         )
-        
+
         email = Email(**email_data.model_dump())
-        
+
         # Scan email for threats
         try:
             scan_result = await scan_email_api(email)
             email.scan_result = scan_result
             email.processed_at = datetime.utcnow()
-            
+
             # Determine status based on scan results
             if scan_result.threat_level in [ThreatLevel.HIGH, ThreatLevel.CRITICAL]:
                 email.status = EmailStatus.QUARANTINED
-                logger.warning(f"Email {email.id} quarantined: {scan_result.threat_level}")
+                logger.warning(
+                    f"Email {email.id} quarantined: {scan_result.threat_level}"
+                )
             elif scan_result.threat_level == ThreatLevel.MEDIUM:
                 email.status = EmailStatus.SUSPICIOUS
             else:
                 email.status = EmailStatus.SAFE
-                
+
         except Exception as e:
             logger.error(f"Scan failed for email {email.id}: {e}")
             email.status = EmailStatus.QUARANTINED  # Fail-safe: quarantine on error
             email.scan_result = ScanResult(
-                threat_level=ThreatLevel.MEDIUM,
-                flags=["scan_error"]
+                threat_level=ThreatLevel.MEDIUM, flags=["scan_error"]
             )
-        
+
         # Store email
         if is_database_configured() and AsyncSessionLocal:
             async with AsyncSessionLocal() as session:
@@ -366,18 +373,20 @@ async def ingest_email(
                 await session.commit()
         else:
             email_store[email.id] = email
-        
+
         logger.info(f"Email {email.id} processed with status: {email.status}")
-        
+
         return WebhookResponse(
             id=email.id,
             status=email.status,
-            message=f"Email processed successfully. Status: {email.status.value}"
+            message=f"Email processed successfully. Status: {email.status.value}",
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to ingest email: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to process email: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to process email: {str(e)}"
+        )
 
 
 # Email listing endpoint
@@ -390,7 +399,7 @@ async def list_emails(
 ):
     """
     List all processed emails with pagination.
-    
+
     Supports filtering by status and sender email address.
     """
     if is_database_configured() and AsyncSessionLocal:
@@ -426,9 +435,7 @@ async def list_emails(
                     subject=record.subject,
                     status=record.status,
                     threat_level=(
-                        record.scan_result.threat_level
-                        if record.scan_result
-                        else None
+                        record.scan_result.threat_level if record.scan_result else None
                     ),
                     received_at=record.received_at,
                 )
@@ -517,7 +524,7 @@ async def list_quarantined(
 ):
     """
     List all quarantined emails awaiting review.
-    
+
     Returns emails with status QUARANTINED that need approval or rejection.
     """
     if is_database_configured() and AsyncSessionLocal:
@@ -549,9 +556,7 @@ async def list_quarantined(
                     subject=record.subject,
                     status=record.status,
                     threat_level=(
-                        record.scan_result.threat_level
-                        if record.scan_result
-                        else None
+                        record.scan_result.threat_level if record.scan_result else None
                     ),
                     received_at=record.received_at,
                 )
@@ -567,7 +572,9 @@ async def list_quarantined(
             )
 
     # Fallback: in-memory store
-    quarantined = [e for e in email_store.values() if e.status == EmailStatus.QUARANTINED]
+    quarantined = [
+        e for e in email_store.values() if e.status == EmailStatus.QUARANTINED
+    ]
 
     # Sort by received date (oldest first - FIFO for review)
     quarantined.sort(key=lambda e: e.received_at)
@@ -607,7 +614,7 @@ async def list_quarantined(
 async def approve_email(email_id: UUID, action: QuarantineAction = None):
     """
     Approve and release an email from quarantine.
-    
+
     The email will be marked as APPROVED and can be delivered to the recipient.
     """
     if is_database_configured() and AsyncSessionLocal:
@@ -648,7 +655,7 @@ async def approve_email(email_id: UUID, action: QuarantineAction = None):
     if email.status != EmailStatus.QUARANTINED:
         raise HTTPException(
             status_code=400,
-            detail=f"Email is not quarantined. Current status: {email.status.value}"
+            detail=f"Email is not quarantined. Current status: {email.status.value}",
         )
 
     email.status = EmailStatus.APPROVED
@@ -668,7 +675,7 @@ async def approve_email(email_id: UUID, action: QuarantineAction = None):
 async def reject_email(email_id: UUID, action: QuarantineAction = None):
     """
     Permanently reject a quarantined email.
-    
+
     The email will be marked as REJECTED and will not be delivered.
     """
     if is_database_configured() and AsyncSessionLocal:
@@ -707,7 +714,7 @@ async def reject_email(email_id: UUID, action: QuarantineAction = None):
     if email.status != EmailStatus.QUARANTINED:
         raise HTTPException(
             status_code=400,
-            detail=f"Email is not quarantined. Current status: {email.status.value}"
+            detail=f"Email is not quarantined. Current status: {email.status.value}",
         )
 
     email.status = EmailStatus.REJECTED
@@ -737,4 +744,5 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

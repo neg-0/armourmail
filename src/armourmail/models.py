@@ -10,6 +10,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 class EmailStatus(str, Enum):
     """Status of an email in the system."""
+
     PENDING = "pending"
     SAFE = "safe"
     SUSPICIOUS = "suspicious"
@@ -20,6 +21,7 @@ class EmailStatus(str, Enum):
 
 class ThreatLevel(str, Enum):
     """Threat level classification."""
+
     NONE = "none"
     LOW = "low"
     MEDIUM = "medium"
@@ -52,6 +54,7 @@ class ScanResult(BaseModel):
 
 class EmailBase(BaseModel):
     """Base email model with common fields."""
+
     sender: str
     recipient: str
     subject: str
@@ -61,6 +64,7 @@ class EmailBase(BaseModel):
 
 class EmailCreate(EmailBase):
     """Model for creating a new email record."""
+
     headers: dict = Field(default_factory=dict)
     attachments: list[str] = Field(default_factory=list)
     raw_payload: Optional[dict] = None
@@ -68,6 +72,7 @@ class EmailCreate(EmailBase):
 
 class Email(EmailBase):
     """Full email model with all fields."""
+
     id: UUID = Field(default_factory=uuid4)
     status: EmailStatus = EmailStatus.PENDING
     scan_result: Optional[ScanResult] = None
@@ -82,6 +87,7 @@ class Email(EmailBase):
 
 class EmailSummary(BaseModel):
     """Summary view of email for list endpoints."""
+
     id: UUID
     sender: str
     recipient: str
@@ -93,6 +99,7 @@ class EmailSummary(BaseModel):
 
 class PaginatedResponse(BaseModel):
     """Generic paginated response wrapper."""
+
     items: list
     total: int
     page: int
@@ -102,6 +109,7 @@ class PaginatedResponse(BaseModel):
 
 class EmailListResponse(BaseModel):
     """Paginated list of emails."""
+
     items: list[EmailSummary]
     total: int
     page: int
@@ -111,12 +119,14 @@ class EmailListResponse(BaseModel):
 
 class QuarantineAction(BaseModel):
     """Action taken on quarantined email."""
+
     reason: Optional[str] = None
     notify_sender: bool = False
 
 
 class HealthResponse(BaseModel):
     """Health check response."""
+
     status: str = "healthy"
     version: str = "1.0.0"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
@@ -124,6 +134,7 @@ class HealthResponse(BaseModel):
 
 class WebhookResponse(BaseModel):
     """Response for webhook ingestion."""
+
     id: UUID
     status: EmailStatus
     message: str
@@ -131,5 +142,6 @@ class WebhookResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     """Standard error response."""
+
     error: str
     detail: Optional[str] = None
