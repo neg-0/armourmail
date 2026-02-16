@@ -27,7 +27,7 @@ ArmourMail is evolving from a simple SendGrid handler into a purpose-built **AI-
 
 1. **Quarantine Logic**: Flag suspicious emails for review instead of immediate delivery to the agent.
 2. **Review API**: Endpoint for a human (or a "High-Trust Agent") to approve/reject quarantined emails.
-3. **Dashboard (Alpha)**: Simple Next.js UI to visualize inbound flow and manage quarantine.
+3. **Dashboard (Alpha)**: [x] Simple Express UI to visualize inbound flow and manage quarantine.
 
 ## Phase 3: Agent Integration (Dogfooding)
 *Target: Late February*
@@ -45,5 +45,6 @@ ArmourMail is evolving from a simple SendGrid handler into a purpose-built **AI-
 
 ## Technical Refinement (Immediate Tasks)
 - [ ] Migrate from `index.js` to a more structured FastAPI (Python) or structured Node project to support heavy regex/NLP.
-- [ ] Initialize `main` branch and push existing work.
-- [ ] Implement `detector.py` (or `.js`) with first set of injection patterns.
+- [x] Initialize `main` branch and push existing work.
+- [x] Implement `detector.py` (or `.js`) with first set of injection patterns.
+- [x] Implement Admin API for agent registration and routing (`/admin/agents`).

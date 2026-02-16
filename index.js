@@ -23,6 +23,151 @@ app.use((req, res, next) => {
     next();
 });
 
+// Admin Authentication Middleware
+const authenticateAdmin = (req, res, next) => {
+    const apiKey = req.headers['x-admin-api-key'];
+    if (!apiKey || apiKey !== process.env.ADMIN_API_KEY) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    next();
+};
+
+// Admin Routes
+app.get('/admin/agents', authenticateAdmin, (req, res) => {
+    try {
+        const agentsConfigPath = path.join(__dirname, 'config', 'agents.json');
+        if (!fs.existsSync(agentsConfigPath)) {
+            return res.json({ agents: {} });
+        }
+        const config = JSON.parse(fs.readFileSync(agentsConfigPath, 'utf8'));
+        res.json(config);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to read agent config' });
+    }
+});
+
+app.post('/admin/agents', authenticateAdmin, (req, res) => {
+    try {
+        const { email, agentId, sessionKey, description, webhookUrl } = req.body;
+        
+        if (!email || !agentId) {
+            return res.status(400).json({ error: 'Missing required fields: email, agentId' });
+        }
+
+        const agentsConfigPath = path.join(__dirname, 'config', 'agents.json');
+        let config = { agents: {} };
+        
+        if (fs.existsSync(agentsConfigPath)) {
+            config = JSON.parse(fs.readFileSync(agentsConfigPath, 'utf8'));
+        }
+
+        config.agents[email] = {
+            id: agentId,
+            sessionKey: sessionKey || `agent:${agentId}:main`,
+            description: description || '',
+            webhookUrl: webhookUrl || null
+        };
+
+        fs.writeFileSync(agentsConfigPath, JSON.stringify(config, null, 2));
+        
+        console.log(`[ADMIN] Registered agent: ${email} -> ${agentId}`);
+        res.json({ success: true, agent: config.agents[email] });
+    } catch (error) {
+        console.error('[ADMIN] Failed to register agent:', error);
+        res.status(500).json({ error: 'Failed to update agent config' });
+    }
+});
+
+// Dashboard Route
+app.get('/dashboard', (req, res) => {
+    const apiKey = req.query.key;
+    if (!apiKey || apiKey !== process.env.ADMIN_API_KEY) {
+        return res.status(401).send('Unauthorized: Invalid Key');
+    }
+
+    const logPath = path.join(__dirname, 'inbound_log.json');
+    let logs = [];
+    if (fs.existsSync(logPath)) {
+        try {
+            logs = JSON.parse(fs.readFileSync(logPath, 'utf8'));
+            if (!Array.isArray(logs)) logs = [];
+        } catch (e) {
+            logs = [];
+        }
+    }
+
+    // Sort by newest first
+    logs.reverse();
+
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>ArmourMail Dashboard</title>
+        <style>
+            body { font-family: sans-serif; padding: 20px; background-color: #f9f9f9; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+            th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+            th { background-color: #f2f2f2; font-weight: bold; }
+            tr:hover { background-color: #f5f5f5; }
+            .quarantined { background-color: #ffebee; color: #c62828; }
+            .quarantined td { border-color: #ef9a9a; }
+            .safe { color: #2e7d32; }
+            .status-badge { 
+                padding: 4px 8px; 
+                border-radius: 4px; 
+                font-size: 0.85em; 
+                font-weight: bold; 
+                text-transform: uppercase;
+            }
+            .status-quarantined { background-color: #d32f2f; color: white; }
+            .status-processed { background-color: #388e3c; color: white; }
+        </style>
+    </head>
+    <body>
+        <h1>🛡️ ArmourMail Quarantine Dashboard</h1>
+        <p>Viewing ${logs.length} recent emails.</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>From</th>
+                    <th>To (Agent)</th>
+                    <th>Subject</th>
+                    <th>Status</th>
+                    <th>Score</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${logs.map(log => {
+                    const isQuarantined = log.detection && log.detection.detected;
+                    const rowClass = isQuarantined ? 'quarantined' : '';
+                    const statusBadge = isQuarantined 
+                        ? '<span class="status-badge status-quarantined">Quarantined</span>' 
+                        : '<span class="status-badge status-processed">Processed</span>';
+                    
+                    const score = log.detection ? log.detection.score : 0;
+                    const agentId = log.routedAgent ? log.routedAgent.id : '<span style="color: #999;">Unmapped</span>';
+                    
+                    return \`
+                    <tr class="\${rowClass}">
+                        <td>\${new Date(log.timestamp).toLocaleString()}</td>
+                        <td>\${log.from}</td>
+                        <td>\${log.recipient}<br><small>\${agentId}</small></td>
+                        <td>\${log.subject}</td>
+                        <td>\${statusBadge}</td>
+                        <td>\${score}</td>
+                    </tr>
+                    \`;
+                }).join('')}
+            </tbody>
+        </table>
+    </body>
+    </html>
+    `;
+    res.send(html);
+});
+
 // Helper function to scan text
 function scanText(text) {
     return new Promise((resolve, reject) => {
@@ -120,48 +265,78 @@ app.post('/api/inbound', upload.any(), async (req, res) => {
         const logPath = path.join(__dirname, 'inbound_log.json');
         let logs = [];
         if (fs.existsSync(logPath)) {
-            logs = JSON.parse(fs.readFileSync(logPath, 'utf8'));
+            try {
+                logs = JSON.parse(fs.readFileSync(logPath, 'utf8'));
+                if (!Array.isArray(logs)) logs = [];
+            } catch (e) {
+                logs = [];
+            }
         }
         logs.push(logEntry);
         fs.writeFileSync(logPath, JSON.stringify(logs.slice(-100), null, 2)); // Keep last 100
 
         // Next: dispatch to downstream worker / queue
 
-        if (routedAgent && process.env.OPENCLAW_HOOKS_TOKEN) {
-            try {
-                const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || 'http://localhost:18789';
-                const hooksToken = process.env.OPENCLAW_HOOKS_TOKEN;
+        // QUARANTINE LOGIC
+        if (detectionResult.detected) {
+            console.warn(`[QUARANTINE] Email blocked for ${routedAgent ? routedAgent.id : 'unknown'}. Score: ${detectionResult.score}`);
+            return res.status(200).send('OK (Quarantined)');
+        }
 
-                const emailBody = text || html || '(No content)';
-                // Limit body size to avoid huge payloads
-                const truncatedBody = emailBody.length > 5000 ? emailBody.substring(0, 5000) + '... (truncated)' : emailBody;
-                
-                const agentMessage = `📧 New Email Received\nFrom: ${from}\nTo: ${to}\nSubject: ${subject}\n\n${truncatedBody}`;
+        if (routedAgent) {
+            const emailBody = text || html || '(No content)';
+            const truncatedBody = emailBody.length > 5000 ? emailBody.substring(0, 5000) + '... (truncated)' : emailBody;
 
-                console.log(`[DISPATCH] Forwarding to ${routedAgent.id}...`);
-                
-                await axios.post(`${gatewayUrl}/hooks/agent`, {
-                    message: agentMessage,
-                    name: "Email",
-                    agentId: routedAgent.id,
-                    wakeMode: "now",
-                    deliver: true
-                }, {
-                    headers: {
-                        'Authorization': `Bearer ${hooksToken}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                console.log(`[DISPATCH] Successfully sent to ${routedAgent.id}`);
-            } catch (dispatchError) {
-                console.error('[ERROR] Failed to dispatch to agent:', dispatchError.message);
-                if (dispatchError.response) {
-                    console.error('[ERROR] Gateway response:', JSON.stringify(dispatchError.response.data));
+            if (routedAgent.webhookUrl) {
+                // Custom Webhook Dispatch
+                console.log(`[DISPATCH] Forwarding to custom webhook for ${routedAgent.id}...`);
+                try {
+                    await axios.post(routedAgent.webhookUrl, {
+                        from,
+                        to,
+                        subject,
+                        text,
+                        html,
+                        agentId: routedAgent.id,
+                        detection: detectionResult
+                    });
+                     console.log(`[DISPATCH] Successfully sent to webhook for ${routedAgent.id}`);
+                } catch (err) {
+                     console.error('[ERROR] Failed to dispatch to webhook:', err.message);
                 }
+            } else if (process.env.OPENCLAW_HOOKS_TOKEN) {
+                // Default OpenClaw Gateway Dispatch
+                try {
+                    const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || 'http://localhost:18789';
+                    const hooksToken = process.env.OPENCLAW_HOOKS_TOKEN;
+
+                    const agentMessage = `📧 New Email Received\nFrom: ${from}\nTo: ${to}\nSubject: ${subject}\n\n${truncatedBody}`;
+
+                    console.log(`[DISPATCH] Forwarding to OpenClaw Gateway for ${routedAgent.id}...`);
+                    
+                    await axios.post(`${gatewayUrl}/hooks/agent`, {
+                        message: agentMessage,
+                        name: "Email",
+                        agentId: routedAgent.id,
+                        wakeMode: "now",
+                        deliver: true
+                    }, {
+                        headers: {
+                            'Authorization': `Bearer ${hooksToken}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    
+                    console.log(`[DISPATCH] Successfully sent to ${routedAgent.id}`);
+                } catch (dispatchError) {
+                    console.error('[ERROR] Failed to dispatch to agent:', dispatchError.message);
+                    if (dispatchError.response) {
+                        console.error('[ERROR] Gateway response:', JSON.stringify(dispatchError.response.data));
+                    }
+                }
+            } else {
+                 console.warn('[CONFIG] No webhookUrl and OPENCLAW_HOOKS_TOKEN missing, skipping dispatch.');
             }
-        } else {
-             if (routedAgent) console.warn('[CONFIG] OPENCLAW_HOOKS_TOKEN missing, skipping dispatch.');
         }
 
         res.status(200).send('OK');
