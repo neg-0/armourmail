@@ -149,16 +149,16 @@ app.get('/dashboard', (req, res) => {
                     const score = log.detection ? log.detection.score : 0;
                     const agentId = log.routedAgent ? log.routedAgent.id : '<span style="color: #999;">Unmapped</span>';
                     
-                    return \`
-                    <tr class="\${rowClass}">
-                        <td>\${new Date(log.timestamp).toLocaleString()}</td>
-                        <td>\${log.from}</td>
-                        <td>\${log.recipient}<br><small>\${agentId}</small></td>
-                        <td>\${log.subject}</td>
-                        <td>\${statusBadge}</td>
-                        <td>\${score}</td>
+                    return `
+                    <tr class="${rowClass}">
+                        <td>${new Date(log.timestamp).toLocaleString()}</td>
+                        <td>${log.from}</td>
+                        <td>${log.recipient}<br><small>${agentId}</small></td>
+                        <td>${log.subject}</td>
+                        <td>${statusBadge}</td>
+                        <td>${score}</td>
                     </tr>
-                    \`;
+                    `;
                 }).join('')}
             </tbody>
         </table>
