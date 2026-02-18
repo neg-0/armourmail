@@ -18,7 +18,7 @@ import html
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class RiskLevel(Enum):
@@ -40,7 +40,7 @@ class ScanResult:
     hidden_text_found: bool = False
     clean_content: str = ""
     quarantine_recommended: bool = False
-    details: dict = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Determine if quarantine is recommended based on risk score."""
@@ -396,7 +396,7 @@ class PromptInjectionDetector:
 
     def _compile_patterns(self) -> None:
         """Compile regex patterns with associated weights."""
-        self.all_patterns: list[tuple[re.Pattern, str, int]] = []
+        self.all_patterns: list[tuple[re.Pattern[str], str, int]] = []
 
         # Pattern groups with weights
         pattern_groups = [
@@ -445,7 +445,7 @@ class PromptInjectionDetector:
         detected_patterns: list[str] = []
         risk_score = 0
         hidden_text_found = False
-        details: dict = {
+        details: dict[str, Any] = {
             "hidden_text": [],
             "base64_suspicious": [],
             "injection_patterns": [],
@@ -533,7 +533,7 @@ class PromptInjectionDetector:
             details=details,
         )
 
-    def _scan_base64(self, content: str) -> list[dict]:
+    def _scan_base64(self, content: str) -> list[dict[str, Any]]:
         """Decode and scan Base64 content for injection patterns."""
         findings = []
 
@@ -671,7 +671,7 @@ def scan_email(
 # =============================================================================
 
 
-async def scan_email_api(email: "object"):
+async def scan_email_api(email: Any) -> Any:
     """Scan an API Email model and return the API ScanResult model.
 
     The FastAPI app (src/armourmail/api.py) expects an async scanner returning

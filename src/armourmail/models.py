@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -65,9 +65,9 @@ class EmailBase(BaseModel):
 class EmailCreate(EmailBase):
     """Model for creating a new email record."""
 
-    headers: dict = Field(default_factory=dict)
+    headers: dict[str, Any] = Field(default_factory=dict)
     attachments: list[str] = Field(default_factory=list)
-    raw_payload: Optional[dict] = None
+    raw_payload: Optional[dict[str, Any]] = None
 
 
 class Email(EmailBase):
@@ -78,7 +78,7 @@ class Email(EmailBase):
     scan_result: Optional[ScanResult] = None
     received_at: datetime = Field(default_factory=datetime.utcnow)
     processed_at: Optional[datetime] = None
-    headers: dict = Field(default_factory=dict)
+    headers: dict[str, Any] = Field(default_factory=dict)
     attachments: list[str] = Field(default_factory=list)
 
     class Config:
@@ -100,7 +100,7 @@ class EmailSummary(BaseModel):
 class PaginatedResponse(BaseModel):
     """Generic paginated response wrapper."""
 
-    items: list
+    items: list[Any]
     total: int
     page: int
     page_size: int

@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from math import ceil
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile
@@ -79,7 +79,7 @@ SENDGRID_WEBHOOK_SECRET = os.getenv("SENDGRID_WEBHOOK_SECRET")
 
 
 @app.middleware("http")
-async def api_key_middleware(request: Request, call_next):
+async def api_key_middleware(request: Request, call_next: Any) -> Any:
     """Require X-API-Key header for all endpoints except webhook ingest."""
     if request.url.path == "/webhook/ingest":
         return await call_next(request)
@@ -126,7 +126,7 @@ def email_record_to_model(record: EmailRecord) -> Email:
 
 # Exception handlers
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """Handle HTTP exceptions with consistent format."""
     return JSONResponse(
         status_code=exc.status_code,
@@ -135,7 +135,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 @app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
+async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle unexpected exceptions."""
     logger.error(f"Unexpected error: {exc}", exc_info=True)
     return JSONResponse(
@@ -148,7 +148,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 # Health check endpoint
 @app.get("/health", response_model=HealthResponse, tags=["System"])
-async def health_check():
+async def health_check() -> HealthResponse:
     """
     Health check endpoint.
 
@@ -159,7 +159,7 @@ async def health_check():
 
 # Dashboard endpoint
 @app.get("/", response_class=HTMLResponse, tags=["Dashboard"])
-async def dashboard():
+async def dashboard() -> HTMLResponse:
     """
     Serve the ArmourMail dashboard.
     """
@@ -182,7 +182,7 @@ async def ingest_email(
     html: str = Form(None),
     headers: str = Form(None),
     raw_email: str = Form(None, alias="email"),
-):
+) -> WebhookResponse:
     """
     Receive emails from SendGrid Inbound Parse webhook.
 
@@ -202,7 +202,7 @@ async def ingest_email(
         # Parse form data and collect attachments
         form = await request.form()
         attachments: list[UploadFile] = []
-        attachment_metadata: list[dict] = []
+        attachment_metadata: list[dict[str, Any]] = []
 
         for key, value in form.multi_items():
             if not key.startswith("attachment"):
@@ -396,7 +396,7 @@ async def list_emails(
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     status: Optional[EmailStatus] = Query(None, description="Filter by status"),
     sender: Optional[str] = Query(None, description="Filter by sender"),
-):
+) -> EmailListResponse:
     """
     List all processed emails with pagination.
 
@@ -494,7 +494,7 @@ async def list_emails(
 
 # Get single email
 @app.get("/emails/{email_id}", response_model=Email, tags=["Emails"])
-async def get_email(email_id: UUID):
+async def get_email(email_id: UUID) -> Email:
     """
     Get a single email by ID with full details and scan results.
     """
@@ -521,7 +521,7 @@ async def get_email(email_id: UUID):
 async def list_quarantined(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-):
+) -> EmailListResponse:
     """
     List all quarantined emails awaiting review.
 
@@ -611,7 +611,7 @@ async def list_quarantined(
 
 # Approve quarantined email
 @app.post("/quarantine/{email_id}/approve", response_model=Email, tags=["Quarantine"])
-async def approve_email(email_id: UUID, action: QuarantineAction = None):
+async def approve_email(email_id: UUID, action: Optional[QuarantineAction] = None) -> Email:
     """
     Approve and release an email from quarantine.
 
@@ -672,7 +672,7 @@ async def approve_email(email_id: UUID, action: QuarantineAction = None):
 
 # Reject quarantined email
 @app.post("/quarantine/{email_id}/reject", response_model=Email, tags=["Quarantine"])
-async def reject_email(email_id: UUID, action: QuarantineAction = None):
+async def reject_email(email_id: UUID, action: Optional[QuarantineAction] = None) -> Email:
     """
     Permanently reject a quarantined email.
 
@@ -728,7 +728,7 @@ async def reject_email(email_id: UUID, action: QuarantineAction = None):
 
 # Application startup/shutdown events
 @app.on_event("startup")
-async def startup_event():
+async def startup_event() -> None:
     """Initialize resources on startup."""
     logger.info("ArmourMail API starting up...")
     if is_database_configured() and engine:
@@ -737,7 +737,7 @@ async def startup_event():
 
 
 @app.on_event("shutdown")
-async def shutdown_event():
+async def shutdown_event() -> None:
     """Cleanup resources on shutdown."""
     logger.info("ArmourMail API shutting down...")
 
