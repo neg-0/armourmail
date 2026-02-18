@@ -611,7 +611,9 @@ async def list_quarantined(
 
 # Approve quarantined email
 @app.post("/quarantine/{email_id}/approve", response_model=Email, tags=["Quarantine"])
-async def approve_email(email_id: UUID, action: Optional[QuarantineAction] = None) -> Email:
+async def approve_email(
+    email_id: UUID, action: Optional[QuarantineAction] = None
+) -> Email:
     """
     Approve and release an email from quarantine.
 
@@ -672,7 +674,9 @@ async def approve_email(email_id: UUID, action: Optional[QuarantineAction] = Non
 
 # Reject quarantined email
 @app.post("/quarantine/{email_id}/reject", response_model=Email, tags=["Quarantine"])
-async def reject_email(email_id: UUID, action: Optional[QuarantineAction] = None) -> Email:
+async def reject_email(
+    email_id: UUID, action: Optional[QuarantineAction] = None
+) -> Email:
     """
     Permanently reject a quarantined email.
 
