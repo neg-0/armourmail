@@ -241,7 +241,7 @@ async def ingest_email(
                 import json
 
                 parsed_headers = json.loads(headers)
-            except:
+            except Exception:
                 # Headers might be in different format
                 parsed_headers = {"raw": headers}
 
