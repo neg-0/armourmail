@@ -80,3 +80,12 @@ supabase/.temp/
 # Local config
 .env.local
 .env.*.local
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+*.log
