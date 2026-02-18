@@ -240,7 +240,7 @@ MANIPULATION_PATTERNS = [
     ),
     # Emotional manipulation
     (
-        r"(?i)(?:please|i\s+beg\s+you|you\s+must|you\s+have\s+to)\s+(?:ignore|forget|disregard)",
+        r"(?i)(?:please|i\s+beg\s+you|you\s+must|you\s+have\s+to)[,\s]+(?:ignore|forget|disregard)",
         "emotional_manipulation",
     ),
     (
@@ -258,11 +258,11 @@ MANIPULATION_PATTERNS = [
 # Extraction attempts
 EXTRACTION_PATTERNS = [
     (
-        r"(?i)(?:reveal|show|display|print|output|echo)\s+(?:your|the|system)\s+(?:prompt|instructions?|rules?)",
+        r"(?i)(?:reveal|show|display|print|output|echo)(?:\s+me)?\s+(?:your|the|system)\s+(?:(?:initial|system|original|current)\s+)?(?:prompt|instructions?|rules?)",
         "prompt_extraction",
     ),
     (
-        r"(?i)(?:what|tell\s+me)\s+(?:is|are)\s+your\s+(?:system\s+)?(?:prompt|instructions?|rules?)",
+        r"(?i)(?:what|tell\s+me)\s+(?:is|are\s+)?your\s+(?:system\s+)?(?:prompt|instructions?|rules?)",
         "prompt_query",
     ),
     (
